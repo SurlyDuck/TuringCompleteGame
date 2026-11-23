@@ -226,6 +226,11 @@ const DISPLAY_PIXEL_32     = 0x03
 
 ; Reads two decimal numbers and output its sum
 ; Using Q16.16
+
+; Made this program for testing the `OS` I'm writing
+; Code is really bad, just tried to build a thing and 
+; didn't give much thought.
+; The kernel code above will be moved to a different file
 orig:
 	mov nr, DISPLAY
 	mov arg0, DISPLAY_MODE
@@ -239,7 +244,7 @@ orig:
 	
 	const screen_ptr = r13
 	mov screen_ptr, screen_data
-	
+begin:
 	; 0x04--PUTS---------STRP--TERM---SCRP--BASE--****--****
 	mov nr, PUTS
 	mov arg0, msg_0
@@ -255,7 +260,10 @@ orig:
 	const STATE_READING_DEC_ONE = 2
 	const STATE_READING_INT_TWO = 3
 	const STATE_READING_DEC_TWO = 4
+	const STATE_PRINTING_RESULT = 4
+	const DECIMAL_PLACES        = 10
 	
+	const misc3                 = r6
 	const misc                  = r7
 	const misc2                 = r8
 	const i                     = r9
@@ -292,10 +300,242 @@ orig:
 		
 		add r2, r2, 1
 		jmp read_loop
+		
+	print_int_loop_start:
+		lsr misc, number_one, 16
+		mov r2, number_integer
+		store_32 [r2], zr
+	print_int_loop_convert:
+		mod misc2, misc, 10
+		add misc2, misc2, 0x30
+		
+		store_8 [r2], misc2
+		add r2, r2, 1
+		
+		div misc, misc, 10
+		
+		cmp misc, 0
+		jne print_int_loop_convert
+	print_int_loop:
+		sub r2, r2, 1
+		
+		load_8 r3, [r2]
+		push r2 ; save pointer, bit of a hack
+		mov nr, PUTC
+		mov arg0, screen_ptr
+		mov arg1, r3
+		syscall
+		pop r2 ; retrieve pointer
+		add screen_ptr, screen_ptr, 1
+		
+		mov misc2, number_integer
+		cmp r2, misc2
+		jne print_int_loop
+		
+	print_dec_start:
+		mov nr, PUTC
+		mov arg0, screen_ptr
+		mov arg1, 0x2E
+		syscall
+		add screen_ptr, screen_ptr, 1
 	
+		; We're going to work with the decimal part now
+		and number_one, number_one, 0x0000FFFF 
+		mov i, 0
+	print_dec_convert_loop:
+		mul misc, number_one, 10
+		mov misc2, mul_conversion
+		load_32 misc2, [misc2]
+		div misc2, misc, misc2
+		add misc2, misc2, 0x30
+		
+		push r2 ; save pointer, bit of a hack
+		; 0x03--PUTC---------SCRP--CHAR---****--****--****--****
+		mov nr, PUTC
+		mov arg0, screen_ptr
+		mov arg1, misc2
+		syscall
+		pop r2 ; retrieve pointer
+		
+		add screen_ptr, screen_ptr, 1
+		
+		mov number_one, misc
+		mov misc, mul_conversion
+		load_32 misc, [misc]
+		mod number_one, number_one, misc
+		
+		cmp i, DECIMAL_PLACES
+		add i, i, 1
+		jb print_dec_convert_loop
+		
+		; 0x04--PUTS---------STRP--TERM---SCRP--BASE--****--****
+		mov nr, PUTS
+		mov arg0, msg_3
+		mov arg1, 0x00
+		mov arg2, screen_ptr
+		mov arg3, screen_data
+		syscall
+		add screen_ptr, screen_ptr, r1
+		
+		mov misc, number_integer
+		store_32 [misc], zr
+		mov misc, number_decimal
+		store_32 [misc], zr
+		mov r1, zr
+		mov r2, zr
+		mov r4, zr
+		mov r5, zr
+		mov r6, zr
+		mov r7, zr
+		mov r8, zr
+		mov r9, zr
+		mov r10, zr
+		mov r11, zr
+		mov r12, zr
+		
+		jmp begin
+		
 	next_state:
 		cmp STATE, STATE_READING_INT_ONE
 		je convert_int_one
+		cmp STATE, STATE_READING_DEC_ONE
+		je convert_dec_one
+		cmp STATE, STATE_READING_INT_TWO
+		je convert_int_two
+		cmp STATE, STATE_READING_DEC_TWO
+		je convert_dec_two
+		
+		convert_dec_two: mov misc, 1
+		convert_dec_two_loop:
+			sub r2, r2, 1
+			load_8 misc2, [r2]
+			sub misc2, misc2, 0x30
+			mul misc2, misc2, misc
+			add number_two, number_two, misc2
+			
+			mov misc2, number_decimal
+			cmp r2, misc2
+			je convert_dec_two_end
+			mul misc, misc, 10
+			jmp convert_dec_two_loop
+			
+			convert_dec_two_end: 
+				mul misc, misc, 10
+				mov misc2, 0
+				mov r2, 0 ; Will be used for counting decimal places
+			convert_dec_two_end_loop:
+				add r2, r2, 1
+				lsl number_two, number_two, 1
+				cmp number_two, misc
+				jae convert_dec_two_end_loop_add_1
+				
+				convert_dec_two_end_loop_add_0:
+					lsl misc2, misc2, 1
+					jmp convert_dec_two_end_loop_check
+				
+				convert_dec_two_end_loop_add_1:
+					lsl misc2, misc2, 1
+					or misc2, misc2, 1
+					sub number_two, number_two, misc
+				
+				convert_dec_two_end_loop_check:
+					cmp r2, 16
+					jne convert_dec_two_end_loop
+					add number_one, number_one, misc2
+					
+					mov nr, PUTS
+					mov arg0, msg_2
+					mov arg1, 0x00
+					mov arg2, screen_ptr
+					mov arg3, screen_data
+					syscall
+					add screen_ptr, screen_ptr, r1
+					
+					mov STATE, STATE_PRINTING_RESULT ;not needed
+					jmp print_int_loop_start
+						
+					
+		
+		convert_int_two: mov misc, 1
+		convert_int_two_loop:
+			sub r2, r2, 1
+			load_8 misc2, [r2]
+			sub misc2, misc2, 0x30
+			mul misc2, misc2, misc
+			add number_two, number_two, misc2
+			
+			mov misc2, number_integer
+			cmp r2, misc2
+			je convert_int_two_end
+			mul misc, misc, 10
+			jmp convert_int_two_loop
+			
+			convert_int_two_end:
+				; We can just add the integer part straight away to the first number
+				mov misc, mul_conversion
+				load_32 misc, [misc]
+				mul number_two, misc, number_two
+				add number_one, number_one, number_two
+				mov STATE, STATE_READING_DEC_TWO
+				mov r2, number_decimal
+				mov BREAK_CHAR, 0x0A
+				mov number_two, 0
+				jmp read_loop
+		
+		convert_dec_one: mov misc, 1
+		convert_dec_one_loop:
+			sub r2, r2, 1
+			load_8 misc2, [r2]
+			sub misc2, misc2, 0x30
+			mul misc2, misc2, misc
+			add number_two, number_two, misc2 ; Using number two temporally only,
+										      ; Don't forget two clear it
+			mov misc2, number_decimal
+			cmp r2, misc2
+			je convert_dec_one_end
+			mul misc, misc, 10
+			jmp convert_dec_one_loop
+			convert_dec_one_end: 
+				mul misc, misc, 10
+				mov r2, 0 ; Will be using to count decimal places
+			convert_dec_one_end_loop:
+				add r2, r2, 1
+				lsl number_two, number_two, 1
+				cmp number_two, misc
+				jae add_one_bit_to_dec
+				lsl misc3, misc3, 1
+				jmp check_end_dec_one_loop
+				
+				add_one_bit_to_dec: 
+					lsl misc3, misc3, 1
+					or misc3, misc3, 1
+					sub number_two, number_two, misc
+				
+				check_end_dec_one_loop: 
+					cmp r2, 16
+					jne convert_dec_one_end_loop
+					or number_one, number_one, misc3
+					and number_two, number_two, 0
+					
+					mov nr, PUTS
+					mov arg0, msg_1
+					mov arg1, 0x00
+					mov arg2, screen_ptr
+					mov arg3, screen_data
+					syscall
+					add screen_ptr, screen_ptr, r1
+					
+					mov misc, number_integer
+					store_32 [misc], zr
+					mov misc, number_decimal
+					store_32 [misc], zr
+					
+					mov r2, number_integer
+					mov BREAK_CHAR, 0x2E
+					mov STATE, STATE_READING_INT_TWO
+					jmp read_loop
+					
+					
 		
 		convert_int_one: mov misc, 1
 		convert_int_one_loop:
@@ -320,24 +560,6 @@ orig:
 				jmp read_loop
 			
 	
-		
-	
-	mov nr, PUTS
-	mov arg0, msg_1
-	mov arg1, 0x00
-	mov arg2, screen_ptr
-	mov arg3, screen_data
-	syscall
-	add screen_ptr, screen_ptr, r1
-	
-	mov nr, PUTS
-	mov arg0, msg_2
-	mov arg1, 0x00
-	mov arg2, screen_ptr
-	mov arg3, screen_data
-	syscall
-	add screen_ptr, screen_ptr, r1
-	
 	mov nr, HALT
 	syscall
 
@@ -359,6 +581,10 @@ msg_1:
 msg_2:
 	"\nYour result is: "
 	U8 0x00
+msg_3:
+	"\n---------------------------------\n"
+	U8 0x00
+
 
 screen_data:
 U30720 0
