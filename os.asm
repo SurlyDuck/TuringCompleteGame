@@ -231,6 +231,7 @@ const DISPLAY_PIXEL_32     = 0x03
 ; Code is really bad, just tried to build a thing and 
 ; didn't give much thought.
 ; The kernel code above will be moved to a different file
+
 orig:
 	mov nr, DISPLAY
 	mov arg0, DISPLAY_MODE
@@ -441,6 +442,17 @@ begin:
 				convert_dec_two_end_loop_check:
 					cmp r2, 16
 					jne convert_dec_two_end_loop
+					
+					; Trying to round half-up in here
+					lsl number_two, number_two, 1
+					cmp number_two, misc
+					jae round2
+					jmp do_not_round2
+					round2: add misc2, misc2, 1
+					do_not_round2:
+					
+					
+					
 					add number_one, number_one, misc2
 					
 					mov nr, PUTS
@@ -454,8 +466,6 @@ begin:
 					mov STATE, STATE_PRINTING_RESULT ;not needed
 					jmp print_int_loop_start
 						
-					
-		
 		convert_int_two: mov misc, 1
 		convert_int_two_loop:
 			sub r2, r2, 1
@@ -515,7 +525,17 @@ begin:
 					cmp r2, 16
 					jne convert_dec_one_end_loop
 					or number_one, number_one, misc3
+					
+					; Trying to round half-up in here
+					lsl number_two, number_two, 1
+					cmp number_two, misc
+					jae round
+					jmp do_not_round
+					round: add number_one, number_one, 1
+					do_not_round:
+					
 					and number_two, number_two, 0
+					
 					
 					mov nr, PUTS
 					mov arg0, msg_1
